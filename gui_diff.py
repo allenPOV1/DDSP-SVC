@@ -11,6 +11,7 @@ from ddsp.core import upsample
 import time
 from gui_diff_locale import I18nAuto
 from diffusion.infer_gt_mel import DiffGtMel
+from scipy import interpolate
 
 def interp(src_y, src_len, tgt_len):
     src_x = np.linspace(0, src_len, src_len)
@@ -125,17 +126,24 @@ class SvcDDSP:
             float(f0_min),
             float(f0_max))
         
-        
+        #print previous f0
         f0 = pitch_extractor.extract(audio, uv_interp=True, device=self.device, silence_front=silence_front)
+        print("prev_f0", f0)
         if pre_calc_f0 is not None:
-            should_have_n_f0= round(self.args.data.sampling_rate/sample_rate)
-            n_p_f0=len(pre_calc_f0)
-            pre_calc_f0=interp(pre_calc_f0,n_p_f0,should_have_n_f0)
-            f0[-should_have_n_f0:] = pre_calc_f0
+            # should_have_n_f0= round(self.args.data.sampling_rate/sample_rate * self.args.data.block_size / 512) 
 
+            print("self.args.data.sampling_rate", self.args.data.sampling_rate)
+            print("sample_rate", sample_rate)
+            print("self.args.data.block_size", self.args.data.block_size)
+            # print("should_have_n_f0", should_have_n_f0)
+            n_p_f0=len(pre_calc_f0)
+            # pre_calc_f0=interp(pre_calc_f0,n_p_f0,should_have_n_f0)
+            f0[-n_p_f0:] = pre_calc_f0
+        print("new_f0", f0)
+        print("length", len(f0))
         f0 = torch.from_numpy(f0).float().to(self.device).unsqueeze(-1).unsqueeze(0)
         f0 = f0 * 2 ** (float(pitch_adjust) / 12)
-
+        
         # extract volume
         volume_extractor = Volume_Extractor(hop_size)
         volume = volume_extractor.extract(audio)
@@ -463,6 +471,7 @@ class GUI:
         '''
         音频处理
         '''
+        print("callback_frame", frames)
         start_time = time.perf_counter()
         print("\nStarting callback")
         self.input_wav[:] = np.roll(self.input_wav, -self.block_frame)
@@ -471,6 +480,7 @@ class GUI:
         end_frame_idx=self.cur_frame_idx+frames
         f0_start_frame_idx=round(self.cur_frame_idx/self.config.samplerate*self.f0_samplerate/self.f0_hop)
         f0_end_frame_idx=round(end_frame_idx/self.config.samplerate*self.f0_samplerate/self.f0_hop)
+        print("index", f0_start_frame_idx, f0_end_frame_idx, frames)
         pre_calc_f0=self.pre_calc_f0[f0_start_frame_idx:f0_end_frame_idx]
         self.cur_frame_idx=end_frame_idx
 
