@@ -12,6 +12,14 @@ import time
 from gui_diff_locale import I18nAuto
 from diffusion.infer_gt_mel import DiffGtMel
 
+def interp(src_y, src_len, tgt_len):
+    src_x = np.linspace(0, src_len, src_len)
+    tgt_x = np.linspace(0, src_len, tgt_len)
+    f = interpolate.interp1d(src_x, src_y, kind="nearest")
+    tgt_y = f(tgt_x)
+    return tgt_y
+
+
 flag_vc = False
 
 def phase_vocoder(a, b, fade_out, fade_in):
@@ -93,7 +101,8 @@ class SvcDDSP:
               diff_method='ddim',
               k_step=None,
               diff_silence=False,
-              audio_alignment=False
+              audio_alignment=False,
+              pre_calc_f0=None
               ):
         print("Infering...")
         # load input
@@ -115,7 +124,15 @@ class SvcDDSP:
             hop_size,
             float(f0_min),
             float(f0_max))
+        
+        
         f0 = pitch_extractor.extract(audio, uv_interp=True, device=self.device, silence_front=silence_front)
+        if pre_calc_f0 is not None:
+            should_have_n_f0= round(self.args.data.sampling_rate/sample_rate)
+            n_p_f0=len(pre_calc_f0)
+            pre_calc_f0=interp(pre_calc_f0,n_p_f0,should_have_n_f0)
+            f0[-should_have_n_f0:] = pre_calc_f0
+
         f0 = torch.from_numpy(f0).float().to(self.device).unsqueeze(-1).unsqueeze(0)
         f0 = f0 * 2 ** (float(pitch_adjust) / 12)
 
@@ -216,6 +233,13 @@ class GUI:
         self.update_devices()
         self.default_input_device = self.input_devices[self.input_devices_indices.index(sd.default.device[0])]
         self.default_output_device = self.output_devices[self.output_devices_indices.index(sd.default.device[1])]
+
+        # TODO:提前load好所有的pitch
+        self.pre_calc_f0 = np.load("your_case.f0.npy")
+        self.cur_frame_idx=0
+        self.f0_samplerate=44100 # 预先提取f0时使用的sr
+        self.f0_hop=512 # 预先提取f0时使用的hop length
+
         self.launcher()  # start
 
     def launcher(self):
@@ -444,6 +468,11 @@ class GUI:
         self.input_wav[:] = np.roll(self.input_wav, -self.block_frame)
         self.input_wav[-self.block_frame:] = librosa.to_mono(indata.T)
 
+        end_frame_idx=self.cur_frame_idx+frames
+        f0_start_frame_idx=round(self.cur_frame_idx/self.config.samplerate*self.f0_samplerate/self.f0_hop)
+        f0_end_frame_idx=round(end_frame_idx/self.config.samplerate*self.f0_samplerate/self.f0_hop)
+        pre_calc_f0=self.pre_calc_f0[f0_start_frame_idx:f0_end_frame_idx]
+
         # infer
         _audio, _model_sr = self.svc_model.infer(
             self.input_wav,
@@ -458,7 +487,8 @@ class GUI:
             diff_acc=self.config.diff_acc,
             diff_method=self.config.diff_method,
             k_step=self.config.k_step,
-            diff_silence=self.config.diff_silence
+            diff_silence=self.config.diff_silence,
+            pre_calc_f0=pre_calc_f0
         )
 
         # debug sola
