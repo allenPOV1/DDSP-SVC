@@ -472,6 +472,7 @@ class GUI:
         f0_start_frame_idx=round(self.cur_frame_idx/self.config.samplerate*self.f0_samplerate/self.f0_hop)
         f0_end_frame_idx=round(end_frame_idx/self.config.samplerate*self.f0_samplerate/self.f0_hop)
         pre_calc_f0=self.pre_calc_f0[f0_start_frame_idx:f0_end_frame_idx]
+        self.cur_frame_idx=end_frame_idx
 
         # infer
         _audio, _model_sr = self.svc_model.infer(
