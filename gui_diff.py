@@ -126,21 +126,23 @@ class SvcDDSP:
             float(f0_min),
             float(f0_max))
         
-        #print previous f0
-        f0 = pitch_extractor.extract(audio, uv_interp=True, device=self.device, silence_front=silence_front)
-        print("prev_f0", f0)
-        if pre_calc_f0 is not None:
-            # should_have_n_f0= round(self.args.data.sampling_rate/sample_rate * self.args.data.block_size / 512) 
+        f0=pre_calc_f0
 
-            print("self.args.data.sampling_rate", self.args.data.sampling_rate)
-            print("sample_rate", sample_rate)
-            print("self.args.data.block_size", self.args.data.block_size)
-            # print("should_have_n_f0", should_have_n_f0)
-            n_p_f0=len(pre_calc_f0)
-            # pre_calc_f0=interp(pre_calc_f0,n_p_f0,should_have_n_f0)
-            f0[-n_p_f0:] = pre_calc_f0
-        print("new_f0", f0)
-        print("length", len(f0))
+        # #print previous f0
+        # f0 = pitch_extractor.extract(audio, uv_interp=True, device=self.device, silence_front=silence_front)
+        # print("prev_f0", f0)
+        # if pre_calc_f0 is not None:
+        #     # should_have_n_f0= round(self.args.data.sampling_rate/sample_rate * self.args.data.block_size / 512) 
+
+        #     print("self.args.data.sampling_rate", self.args.data.sampling_rate)
+        #     print("sample_rate", sample_rate)
+        #     print("self.args.data.block_size", self.args.data.block_size)
+        #     # print("should_have_n_f0", should_have_n_f0)
+        #     n_p_f0=len(pre_calc_f0)
+        #     # pre_calc_f0=interp(pre_calc_f0,n_p_f0,should_have_n_f0)
+        #     f0[-n_p_f0:] = pre_calc_f0
+        # print("new_f0", f0)
+        # print("length", len(f0))
         f0 = torch.from_numpy(f0).float().to(self.device).unsqueeze(-1).unsqueeze(0)
         f0 = f0 * 2 ** (float(pitch_adjust) / 12)
         
@@ -439,6 +441,12 @@ class GUI:
         '''开始音频转换'''
         torch.cuda.empty_cache()
         self.input_wav = np.zeros(self.input_frame, dtype='float32')
+
+        wav_len=len(self.input_wav)
+        hop_size=512
+        self.total_frames=round(wav_len/hop_size)
+        self.pre_pitch=np.zeros(self.total_frames,dtype="float32")
+
         self.sola_buffer = torch.zeros(self.crossfade_frame, device=self.device)
         self.fade_in_window = torch.sin(
             np.pi * torch.arange(0, 1, 1 / self.crossfade_frame, device=self.device) / 2) ** 2
@@ -477,12 +485,24 @@ class GUI:
         self.input_wav[:] = np.roll(self.input_wav, -self.block_frame)
         self.input_wav[-self.block_frame:] = librosa.to_mono(indata.T)
 
+        # end_frame_idx=self.cur_frame_idx+frames
+        # f0_start_frame_idx=round(self.cur_frame_idx/self.config.samplerate*self.f0_samplerate/self.f0_hop)
+        # f0_end_frame_idx=round(end_frame_idx/self.config.samplerate*self.f0_samplerate/self.f0_hop)
+        # print("index", f0_start_frame_idx, f0_end_frame_idx, frames)
+        # pre_calc_f0=self.pre_calc_f0[f0_start_frame_idx:f0_end_frame_idx]
+        # self.cur_frame_idx=end_frame_idx
+
         end_frame_idx=self.cur_frame_idx+frames
         f0_start_frame_idx=round(self.cur_frame_idx/self.config.samplerate*self.f0_samplerate/self.f0_hop)
         f0_end_frame_idx=round(end_frame_idx/self.config.samplerate*self.f0_samplerate/self.f0_hop)
-        print("index", f0_start_frame_idx, f0_end_frame_idx, frames)
         pre_calc_f0=self.pre_calc_f0[f0_start_frame_idx:f0_end_frame_idx]
+
+        n_p_f0=len(pre_calc_f0)
+        self.pre_pitch[:]=np.roll(self.pre_pitch,-n_p_f0)
+        self.pre_pitch[-n_p_f0:]=pre_calc_f0
+        
         self.cur_frame_idx=end_frame_idx
+
 
         # infer
         _audio, _model_sr = self.svc_model.infer(
@@ -499,7 +519,7 @@ class GUI:
             diff_method=self.config.diff_method,
             k_step=self.config.k_step,
             diff_silence=self.config.diff_silence,
-            pre_calc_f0=pre_calc_f0
+            pre_calc_f0=self.pre_pitch
         )
 
         # debug sola
